@@ -25,7 +25,6 @@ contract IRS is DSMath {
     uint256 public startingRhi;
     address public reciever;
 
-
     mapping(address => uint256) public payerDeposits;
 
     enum States {
@@ -61,7 +60,7 @@ contract IRS is DSMath {
     }
 
     function start() public {
-        require(now >= toStart && curerntState == states.JOINABLE);
+        require(now >= toStart && curerntState == States.JOINABLE);
 
         // uint256 recieverReservesNeeded = mul(rmul(totalPayerDeposits, rpow(rate, term)), maxRate);
         // uint256 reservesToReturn = sub(recieverDeposits, recieverReservesNeeded);
@@ -69,12 +68,12 @@ contract IRS is DSMath {
 
         startDate = uint256(now);
         startingRhi = tub.rhi();
-        curerntState = states.STARTED;
+        curerntState = States.STARTED;
     }
 
 
     function join(uint256 notionalAmt) public {
-        require(curerntState == states.JOINABLE);
+        require(curerntState == States.JOINABLE);
 
         // payer joins
         uint256 depositsRequired = sub(mul(notionalAmt, 10 ** 9), rmul(mul(notionalAmt, 10 ** 9), rpow(rate, term))) / 10 ** 9;
