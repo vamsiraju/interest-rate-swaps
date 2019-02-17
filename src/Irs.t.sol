@@ -4,18 +4,22 @@ import "ds-test/test.sol";
 
 import "./Irs.sol";
 
+contract Tub {
+    uint256 public _chi;
+    function chi() public returns (uint256) { return _chi; }
+    function setChi(uint256 chi_) public { _chi = chi_; }
+}
+
 contract IrsTest is DSTest {
-    Irs irs;
+    Tub tub;
 
     function setUp() public {
-        irs = new Irs();
+        tub = new Tub();
     }
 
-    function testFail_basic_sanity() public {
-        assertTrue(false);
-    }
-
-    function test_basic_sanity() public {
-        assertTrue(true);
+    function test_set_chi() public {
+        assertEq(tub.chi(), uint256(0));
+        tub.setChi(123);
+        assertEq(tub.chi(), 123);
     }
 }
