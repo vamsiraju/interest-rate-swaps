@@ -26,7 +26,7 @@ contract VanillaIRS is DSMath {
         uint256 expiry;
     }
 
-    // mapping: receiver address => hash of the terms => reveiver's offer for these terms
+    // receiver address => hash of the terms => reveiver's offer for these terms
     mapping(address => mapping(bytes32 => Offer)) public offers;
 
     struct Swap {
@@ -37,22 +37,29 @@ contract VanillaIRS is DSMath {
         uint256 fixedRate;
         uint256 maxRate;
 
-        uint256 startRhi;
-        uint256 settledRhi;
-        uint256 settlementDate;
-        bool    settled;
+        uint256 receiverLocked;
+        uint256 payerLocked;
+
+        uint256 startingRhi;
+        uint256 endDate;
+        bool settled;
     }
 
     mapping(uint => Swap) public swaps;
     uint nSwapId;
 
     event SwapCreated(address indexed receiver, address indexed payer, uint swapid);
+    event SwapSettled(address indexed receiver, address indexed payer, uint swapid);
 
     mapping(address => uint256) public lockedBalance;
 
     constructor(TokenLike gem_, TubLike tub_) public {
         gem = gem_;
         tub = tub_;
+    }
+
+    function toRAY(uint256 wad) public pure returns(uint256 _ray) {
+        _ray = mul(wad, 10 ** 9);
     }
 
     // receivers can update their offers for terms anytime
@@ -77,29 +84,52 @@ contract VanillaIRS is DSMath {
         swap.fixedRate = terms_.fixedRate;
         swap.maxRate = terms_.maxFloatingRate;
 
-        swap.startRhi = tub.rhi();
-        swap.settledRhi = tub.rhi(); // can be left at 0 too?
-        swap.settlementDate = now + terms_.tenor;
+        swap.startingRhi = tub.rhi();
+        swap.endDate = now + terms_.tenor;
         // swap.settled;
 
-        // calculate the amount of reserves to lock for both parties
+        // reserves locked for both parties
+        swap.receiverLocked = sub(toRAY(notionalAmt_), rmul(toRAY(notionalAmt_), rpow(swap.maxRate, terms_.tenor))) / 10 ** 9;
+        swap.payerLocked = sub(toRAY(notionalAmt_), rmul(toRAY(notionalAmt_), rpow(swap.fixedRate, terms_.tenor))) / 10 ** 9;
 
-        // use require when transferring funds
+        require(gem.pull(receiver_, swap.receiverLocked));
+        lockedBalance[swap.receiver] = sub(lockedBalance[swap.receiver], swap.receiverLocked);
+
+        require(gem.pull(msg.sender, swap.payerLocked));
+        lockedBalance[msg.sender] = sub(lockedBalance[msg.sender], swap.payerLocked);
 
         nSwapId = nSwapId++;
     }
 
-    // either receiver or payer has to individually settle each swap
-    // settlement is done once after expiry in this implementation
+    // receiver or payer calls once after expiry to settle the swap 
     function settleSwap(uint256 swapid) public {
         Swap storage swap = swaps[swapid];
         
         require(!swap.settled);
-        require(now >= swap.settlementDate);
+        require(now >= swap.endDate);
 
-        // calculate payout
-        // transfer from locked reserves to both parties
+        uint256 currentRhi = tub.rhi();
+        uint256 accumulatedRhi = sub(currentRhi, startingRhi);
+        
+        // payer gets floating rate payments
+        uint256 payerSettled = rmul(accumulatedRhi, toRAY(swap.notionalAmt)) / 10 ** 9;
+
+        // cap max receiver payout to locked amt
+        if(payerSettled > swap.receiverLocked) {
+            payerSettled = swap.receiverLocked;
+        }
+
+        uint256 receiverRemaining = sub(swap.receiverLocked, payerSettled);
+
+        receiverSettled = add(payerLocked, receiverRemaining);
+
+        require(gem.push(receiver_, receiverSettled));
+        lockedBalance[swap.receiver] = sub(lockedBalance[swap.receiver], receiverSettled);
+
+        require(gem.pull(msg.sender, payerSettled));
+        lockedBalance[msg.sender] = sub(lockedBalance[msg.sender], payerSettled);
 
         swap.settled = true;
+        emit SwapSettled(swap.receiver, swap.payer, swapid);
     }
 }
