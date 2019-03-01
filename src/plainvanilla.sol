@@ -2,16 +2,16 @@ pragma solidity ^0.5.3;
 
 import "ds-math/math.sol";
 
-contract TokenLike {
-    function pull(address, uint256) public;
-    function push(address, uint256) public;
+interface TokenLike {
+    function transfer(address, uint) external returns (bool);
+    function transferFrom(address, address, uint) external returns (bool);
 }
 
-contract TubLike {
-    function rhi() public;
+interface TubLike {
+    function rhi() external returns (uint256);
 }
 
-contract VanillaIRS is DSMath {
+contract PlainVanilla is DSMath {
     TokenLike public gem;
     TubLike public tub;
 
@@ -64,13 +64,30 @@ contract VanillaIRS is DSMath {
 
     // receivers can update their offers for terms anytime
     // balance is locked from receiver when a swap is created
-    function updateOffer(Terms terms_, Offer offer) public {
-        bytes32 termsId = keccak256(abi.encodePacked(terms_));
-        offers[msg.sender][termsId] = offer;
+    function updateOffer(
+        uint256 fixedRate_,
+        uint256 maxFloatingRate_,
+        uint256 tenor_,
+        uint256 amt_,
+        uint256 expiry_
+    ) 
+    public 
+    {
+        bytes32 termsId = keccak256(abi.encodePacked(fixedRate_, maxFloatingRate_, tenor_));
+        offers[msg.sender][termsId].amt = amt_;
+        offers[msg.sender][termsId].amt = expiry_;
     }
 
-    function createSwap(address receiver_, Terms terms_, uint256 notionalAmt_) public {
-        bytes32 termsId = keccak256(abi.encodePacked(terms_));
+    function createSwap(
+        address receiver_, 
+        uint256 fixedRate_,
+        uint256 maxFloatingRate_,
+        uint256 tenor_, 
+        uint256 notionalAmt_
+    ) 
+    public 
+    {
+        bytes32 termsId = keccak256(abi.encodePacked(fixedRate_, maxFloatingRate_, tenor_));
         Offer storage offer = offers[receiver_][termsId];
         Swap storage swap = swaps[nSwapId];
         
@@ -81,21 +98,21 @@ contract VanillaIRS is DSMath {
         swap.payer = msg.sender;
 
         swap.notionalAmt = notionalAmt_;
-        swap.fixedRate = terms_.fixedRate;
-        swap.maxRate = terms_.maxFloatingRate;
+        swap.fixedRate = fixedRate_;
+        swap.maxRate = maxFloatingRate_;
 
         swap.startingRhi = tub.rhi();
-        swap.endDate = now + terms_.tenor;
+        swap.endDate = now + tenor_;
         // swap.settled;
 
         // reserves locked for both parties
-        swap.receiverLocked = sub(toRAY(notionalAmt_), rmul(toRAY(notionalAmt_), rpow(swap.maxRate, terms_.tenor))) / 10 ** 9;
-        swap.payerLocked = sub(toRAY(notionalAmt_), rmul(toRAY(notionalAmt_), rpow(swap.fixedRate, terms_.tenor))) / 10 ** 9;
+        swap.receiverLocked = sub(toRAY(notionalAmt_), rmul(toRAY(notionalAmt_), rpow(swap.maxRate, tenor_))) / 10 ** 9;
+        swap.payerLocked = sub(toRAY(notionalAmt_), rmul(toRAY(notionalAmt_), rpow(swap.fixedRate, tenor_))) / 10 ** 9;
 
-        require(gem.pull(receiver_, swap.receiverLocked));
+        require(gem.transferFrom(receiver_, address(this), swap.receiverLocked));
         lockedBalance[swap.receiver] = sub(lockedBalance[swap.receiver], swap.receiverLocked);
 
-        require(gem.pull(msg.sender, swap.payerLocked));
+        require(gem.transferFrom(msg.sender, address(this), swap.payerLocked));
         lockedBalance[msg.sender] = sub(lockedBalance[msg.sender], swap.payerLocked);
 
         nSwapId = nSwapId++;
@@ -109,7 +126,7 @@ contract VanillaIRS is DSMath {
         require(now >= swap.endDate);
 
         uint256 currentRhi = tub.rhi();
-        uint256 accumulatedRhi = sub(currentRhi, startingRhi);
+        uint256 accumulatedRhi = sub(currentRhi, swap.startingRhi);
         
         // payer gets floating rate payments
         uint256 payerSettled = rmul(accumulatedRhi, toRAY(swap.notionalAmt)) / 10 ** 9;
@@ -120,14 +137,13 @@ contract VanillaIRS is DSMath {
         }
 
         uint256 receiverRemaining = sub(swap.receiverLocked, payerSettled);
+        uint256 receiverSettled = add(swap.payerLocked, receiverRemaining);
 
-        receiverSettled = add(payerLocked, receiverRemaining);
-
-        require(gem.push(receiver_, receiverSettled));
+        require(gem.transfer(swap.receiver, receiverSettled));
         lockedBalance[swap.receiver] = sub(lockedBalance[swap.receiver], receiverSettled);
 
-        require(gem.pull(msg.sender, payerSettled));
-        lockedBalance[msg.sender] = sub(lockedBalance[msg.sender], payerSettled);
+        require(gem.transfer(swap.payer, payerSettled));
+        lockedBalance[swap.payer] = sub(lockedBalance[swap.payer], payerSettled);
 
         swap.settled = true;
         emit SwapSettled(swap.receiver, swap.payer, swapid);

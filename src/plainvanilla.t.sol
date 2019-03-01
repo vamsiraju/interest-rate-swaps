@@ -2,7 +2,7 @@ pragma solidity ^0.5.3;
 
 import "ds-test/test.sol";
 
-import "./vanilla-irs.sol";
+import "./plainvanilla.sol";
 
 contract Tub {
     uint256 public _chi;
@@ -10,10 +10,16 @@ contract Tub {
     function setChi(uint256 chi_) public { _chi = chi_; }
 }
 
-contract VanillaIRS is DSTest {
+contract PlainVanillaTest is DSTest {
     Tub tub;
 
     function setUp() public {
         tub = new Tub();
+    }
+
+    function test_set_chi() public {
+        assertEq(tub.chi(), uint256(0));
+        tub.setChi(123);
+        assertEq(tub.chi(), 123);
     }
 }
