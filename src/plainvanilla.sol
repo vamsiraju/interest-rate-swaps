@@ -11,6 +11,13 @@ interface TubLike {
     function rhi() external returns (uint256);
 }
 
+/**
+ Plain Vanilla Interest Rate Swap
+  * Tenor - total term of the swap
+  * Receiver - pays stability fee rate capped at a max
+  * Payer - cdp owner pays a fixed rate over the tenor
+ */ 
+
 contract PlainVanilla is DSMath {
     TokenLike public gem;
     TubLike public tub;
@@ -26,7 +33,7 @@ contract PlainVanilla is DSMath {
         uint256 expiry;
     }
 
-    // receiver address => hash of the terms => reveiver's offer for these terms
+    // receiver address => terms hash => reveiver's offer for these terms
     mapping(address => mapping(bytes32 => Offer)) public offers;
 
     struct Swap {
@@ -35,23 +42,23 @@ contract PlainVanilla is DSMath {
 
         uint256 notionalAmt;
         uint256 fixedRate;
-        uint256 maxRate;
+        uint256 maxFloatingRate;
 
         uint256 receiverLocked;
         uint256 payerLocked;
 
         uint256 startingRhi;
         uint256 endDate;
-        bool settled;
+        bool    settled;
     }
 
     mapping(uint => Swap) public swaps;
     uint nSwapId;
 
+    mapping(address => uint256) public lockedBalance;
+
     event SwapCreated(address indexed receiver, address indexed payer, uint swapid);
     event SwapSettled(address indexed receiver, address indexed payer, uint swapid);
-
-    mapping(address => uint256) public lockedBalance;
 
     constructor(TokenLike gem_, TubLike tub_) public {
         gem = gem_;
@@ -63,7 +70,7 @@ contract PlainVanilla is DSMath {
     }
 
     // receivers can update their offers for terms anytime
-    // balance is locked from receiver when a swap is created
+    // balance is locked only when a swap is created
     function updateOffer(
         uint256 fixedRate_,
         uint256 maxFloatingRate_,
@@ -78,6 +85,7 @@ contract PlainVanilla is DSMath {
         offers[msg.sender][termsId].amt = expiry_;
     }
 
+    // payer creates a new swap against terms offered by a receiver 
     function createSwap(
         address receiver_, 
         uint256 fixedRate_,
@@ -99,14 +107,13 @@ contract PlainVanilla is DSMath {
 
         swap.notionalAmt = notionalAmt_;
         swap.fixedRate = fixedRate_;
-        swap.maxRate = maxFloatingRate_;
+        swap.maxFloatingRate = maxFloatingRate_;
 
         swap.startingRhi = tub.rhi();
         swap.endDate = now + tenor_;
-        // swap.settled;
 
-        // reserves locked for both parties
-        swap.receiverLocked = sub(toRAY(notionalAmt_), rmul(toRAY(notionalAmt_), rpow(swap.maxRate, tenor_))) / 10 ** 9;
+        // max interest payout amounts locked for both parties
+        swap.receiverLocked = sub(toRAY(notionalAmt_), rmul(toRAY(notionalAmt_), rpow(swap.maxFloatingRate, tenor_))) / 10 ** 9;
         swap.payerLocked = sub(toRAY(notionalAmt_), rmul(toRAY(notionalAmt_), rpow(swap.fixedRate, tenor_))) / 10 ** 9;
 
         require(gem.transferFrom(receiver_, address(this), swap.receiverLocked));
@@ -118,7 +125,7 @@ contract PlainVanilla is DSMath {
         nSwapId = nSwapId++;
     }
 
-    // receiver or payer calls once after expiry to settle the swap 
+    // receiver or payer settle swap once immediately after expiry
     function settleSwap(uint256 swapid) public {
         Swap storage swap = swaps[swapid];
         
@@ -131,7 +138,7 @@ contract PlainVanilla is DSMath {
         // payer gets floating rate payments
         uint256 payerSettled = rmul(accumulatedRhi, toRAY(swap.notionalAmt)) / 10 ** 9;
 
-        // cap max receiver payout to locked amt
+        // cap max payout to receiver locked amt
         if(payerSettled > swap.receiverLocked) {
             payerSettled = swap.receiverLocked;
         }
