@@ -1,4 +1,4 @@
-pragma solidity ^0.5.3;
+pragma solidity >=0.5.0;
 
 import "ds-test/test.sol";
 import "ds-math/math.sol";
@@ -137,13 +137,13 @@ contract SwapTest is DSTest, DSMath {
         assertEq(gem.balanceOf(address(uma)), 95534067053380677175532);
         assertEq(gem.balanceOf(address(ava)), 104465932946619322824468);// ~ 44,660 gems profit
     }
-    
+
     // TODO:
     // tweak
     // multiple partial offers
     // multiple swaps on one offer
     // rhi variations
-    // taker payday, not max payout
-    // taker payday, max payout 
+    // payer profit, not max payout
+    // payer profit, max payout 
 }
 

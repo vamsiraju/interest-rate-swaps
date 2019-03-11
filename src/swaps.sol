@@ -1,4 +1,4 @@
-/// swap.sol
+/// swaps.sol
 
 // Copyright (C) 2019 Joshua Levine <jparklev@gmail.com>
 // Copyright (C) 2019 Vamsi Alluri <hi@vamsiraju.com>
