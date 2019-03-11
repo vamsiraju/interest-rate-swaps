@@ -146,4 +146,3 @@ contract SwapTest is DSTest, DSMath {
     // payer profit, not max payout
     // payer profit, max payout 
 }
-

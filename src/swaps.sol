@@ -39,7 +39,7 @@ contract SwapEvents {
         uint256 ttl,   // time-to-maturity
         uint256 start, // starting timestamp
         uint256 pot,   // notional principal
-        uint256 rhi    // rate accumulator value
+        uint256 rhi    // starting rhi
     );
     event NewOffer(
         address indexed lad, 
@@ -110,7 +110,7 @@ contract Swaps is DSMath, SwapEvents {
         require(swaps[swapId], "swaps: swap id must be of an active swap");
         require(now >= add(start, ttl), "swaps: swap must be past maturity");
 
-        uint256 accruedInterest = wmul(pot, sub(tub.rhi(), rhi)) / 10 ** 9;
+        uint256 accruedInterest = sub(wmul(pot, rdiv(tub.rhi(), rhi)) / 10 ** 9, pot);
         uint256 takerPool = sub(rmul(toRAY(pot), rpow(tag, ttl)) / 10 ** 9, pot);
         uint256 providerPool = sub(rmul(toRAY(pot), rpow(cap, ttl)) / 10 ** 9, pot);
         
