@@ -29,33 +29,17 @@ interface TubLike {
     function rhi() external returns (uint256);
 }
 
-    // struct Offer {
-    //     uint256 pot; // notional amount
-    //     uint256 end; // offer end time
-    // }
-
-    // struct Swap {
-    //     address lad;  // offer provider
-    //     address gal;  // swap taker
-    //     uint256 pot;  // notional
-    //     uint256 tag;  // fixed rate
-    //     uint256 cap;  // max payout
-    //     uint256 rhi;  // starting rhi
-    //     uint256 end;  // swap maturity timestamp
-    //     bool settled; // has been settled
-    // }
-
 contract SwapEvents {
     event Settled(address indexed lad, address indexed gal);
     event NewSwap(
-        address indexed lad, 
-        address indexed gal, 
-        uint256 indexed tag,
-        uint256 cap,
-        uint256 ttl,
-        uint256 start,
-        uint256 pot,
-        uint256 rhi
+        address indexed lad, // receiver
+        address indexed gal, // payer
+        uint256 indexed tag, // swap rate
+        uint256 cap,   // max payout rate
+        uint256 ttl,   // time-to-maturity
+        uint256 start, // starting timestamp
+        uint256 pot,   // notional principal
+        uint256 rhi    // rate accumulator value
     );
     event NewOffer(
         address indexed lad, 
@@ -70,30 +54,32 @@ contract Swaps is DSMath, SwapEvents {
     TokenLike public gem; // payout token
     TubLike   public tub; // rate source
 
-    mapping(bytes32 => uint256) public pots; // offerId => notional principal amount
-    mapping(bytes32 => bool)   public swaps; // swapId  => isActive?
+    mapping(bytes32 => uint256) public pots; // offerHash => notionalPrincipal
+    mapping(bytes32 => bool)   public swaps; // swapHash  => isLive?
 
     constructor(address gem_, address tub_) public {
         gem = TokenLike(gem_);
         tub = TubLike(tub_);
     }
 
-    // --- Provider Interface ---
+    // --- Receiver Interface ---
     function offer(uint256 tag_, uint256 cap_, uint256 ttl_, uint256 pot_) public {
         uint256 due = sub(rmul(toRAY(pot_), rpow(cap_, mul(ttl_, 1 days))) / 10 ** 9, pot_);
+
         require(gem.transferFrom(msg.sender, address(this), due), "swaps: token transfer failed");
         require(pot_ > 0.05 ether, "swaps: offer must have a pot of more than 0.05 gems");
 
         bytes32 offerId = keccak256(
             abi.encodePacked(msg.sender, tag_, cap_, mul(ttl_, 1 days))
         );
+
         require(pots[offerId] == 0, "swaps: pot not empty");
         pots[offerId] = pot_;
         emit NewOffer(msg.sender, tag_, cap_, mul(ttl_, 1 days), pot_);
     }
-    // function tweak() {}
+    // function tweak() public {}
 
-    // --- Taker Interface ---
+    // --- Payer Interface ---
     function take(
         address lad_, uint256 tag_, uint256 cap_, uint256 ttl_, uint256 pot_
     ) public {
@@ -124,10 +110,10 @@ contract Swaps is DSMath, SwapEvents {
         require(swaps[swapId], "swaps: swap id must be of an active swap");
         require(now >= add(start_, ttl_), "swaps: swap must be past maturity");
 
-        uint256 accruedInterest = mul(pot_, sub(tub.rhi(), rhi_));
+        uint256 accruedInterest = wmul(pot_, sub(tub.rhi(), rhi_)) / 10 ** 9;
         uint256 takerPool = sub(rmul(toRAY(pot_), rpow(tag_, ttl_)) / 10 ** 9, pot_);
         uint256 providerPool = sub(rmul(toRAY(pot_), rpow(cap_, ttl_)) / 10 ** 9, pot_);
-
+        
         // if the accrued interest is more than what the taker pooled, the rate moved against the provider
         if (takerPool < accruedInterest) {
             // if the provider owes more than what they pooled, the taker gets whats there
